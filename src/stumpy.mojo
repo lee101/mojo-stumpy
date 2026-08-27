@@ -1,7 +1,8 @@
 """Matrix-profile and distance-profile kernels exposed through a C ABI."""
 
-from std.algorithm import sync_parallelize
+from max.algorithm import parallelize
 from std.math import pow, sqrt
+from std.runtime import initialize_runtime
 from std.sys.info import simd_width_of
 
 comptime Ptr = UnsafePointer[Float64, AnyOrigin[mut=True]]
@@ -116,6 +117,7 @@ def mst_profile(
     left_indices_address: Int,
     right_indices_address: Int,
 ) abi("C"):
+    initialize_runtime()
     var a = fp(a_address)
     var b = fp(b_address)
     var means_a = fp(means_a_address)
@@ -209,7 +211,7 @@ def mst_profile(
                 j += 1
             diagonal_index += workers
 
-    sync_parallelize[process](workers)
+    parallelize[process](workers)
 
     for worker in range(1, workers):
         var worker_profiles = profiles + worker * length_a * k
@@ -250,6 +252,7 @@ def mst_distance_profile(
     p_norm: Float64,
     result_address: Int,
 ) abi("C"):
+    initialize_runtime()
     var query = fp(query_address)
     var series = fp(series_address)
     var means = fp(means_address)
@@ -289,7 +292,7 @@ def mst_distance_profile(
                 result[i] = pow(total, 1.0 / p_norm)
 
     if length >= PARALLEL_DISTANCE_THRESHOLD:
-        sync_parallelize[compute](length)
+        parallelize[compute](length)
     else:
         for i in range(length):
             compute(i)
@@ -306,6 +309,7 @@ def mst_normalize_products(
     query_std: Float64,
     result_address: Int,
 ) abi("C"):
+    initialize_runtime()
     var products = fp(products_address)
     var means = fp(means_address)
     var stds = fp(stds_address)
@@ -350,7 +354,7 @@ def mst_normalize_products(
     comptime CHUNK_SIZE = 4_096
     var chunks = (length + CHUNK_SIZE - 1) // CHUNK_SIZE
     if length >= PARALLEL_DISTANCE_THRESHOLD:
-        sync_parallelize[compute_chunk](chunks)
+        parallelize[compute_chunk](chunks)
     else:
         for chunk in range(chunks):
             compute_chunk(chunk)
