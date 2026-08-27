@@ -80,18 +80,19 @@ machine-wide lock for the whole benchmark.
 
 | benchmark | mojo-stumpy | STUMPY | result |
 | --- | ---: | ---: | ---: |
-| stump self-join (5,000, m=64) | 44.42 ms | 3569.42 ms | 80.35x faster |
-| stump AB-join (3,500 x 4,000, m=64) | 45.95 ms | 3667.54 ms | 79.82x faster |
-| stump top-3 self-join (3,000, m=64) | 24.93 ms | 3140.14 ms | 125.95x faster |
-| aamp p=2 self-join (5,000, m=64) | 36.14 ms | 3625.20 ms | 100.32x faster |
-| mass distance profile (1,000,000, m=128) | 217.72 ms | 230.43 ms | 1.06x faster |
-| mpdist (1,500 x 1,700, m=48) | 30.80 ms | 7209.67 ms | 234.10x faster |
+| stump self-join (5,000, m=64) | 28.84 ms | 1978.65 ms | 68.60x faster |
+| stump AB-join (3,500 x 4,000, m=64) | 30.43 ms | 1969.51 ms | 64.73x faster |
+| stump top-3 self-join (3,000, m=64) | 12.84 ms | 1986.77 ms | 154.70x faster |
+| aamp p=2 self-join (5,000, m=64) | 17.90 ms | 1950.22 ms | 108.95x faster |
+| mass distance profile (1,000,000, m=128) | 87.34 ms | 268.94 ms | 3.08x faster |
+| mpdist (1,500 x 1,700, m=48) | 12.61 ms | 3679.10 ms | 291.72x faster |
 
-Large, finite normalized MASS workloads use an FFT correlation followed by a
-parallel SIMD normalization pass in Mojo. Smaller or irregular workloads stay
-on the direct SIMD kernel to avoid FFT and thread-launch overhead. The exact
-matrix-profile kernels walk distance-matrix diagonals with constant-time
-recurrence updates.
+MASS uses parallel SIMD dot products while their cache reuse beats FFT setup,
+including for the benchmark above, and switches to FFT correlation for larger
+finite, non-constant workloads. Small inputs remain serial to avoid thread-launch
+overhead. All-finite inputs skip unnecessary window-prefix allocations, and
+rolling-statistics buffers are reused in place. The exact matrix-profile kernels
+walk distance-matrix diagonals with constant-time recurrence updates.
 
 There is no GPU path. These kernels stream through input arrays with low
 arithmetic intensity, so this port focuses on CPU execution.

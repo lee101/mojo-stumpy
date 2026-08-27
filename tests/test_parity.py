@@ -211,6 +211,33 @@ def test_mass_fft_serial_parallel_and_simd_tail(monkeypatch, n):
     assert np.allclose(ours, theirs, atol=1e-10, rtol=1e-10)
 
 
+def test_mass_all_finite_nonconstant_fast_path():
+    rng = np.random.default_rng(101)
+    series = rng.normal(size=205)
+    query = rng.normal(size=19)
+    valid, constant = mst_core._window_flags(series, query.size)
+    assert np.all(valid == 1)
+    assert np.all(constant == 0)
+    assert np.allclose(
+        mst.mass(query, series),
+        stumpy.mass(query, series),
+        atol=1e-10,
+        rtol=1e-10,
+    )
+
+
+def test_mass_direct_parallel_simd_tail(monkeypatch):
+    rng = np.random.default_rng(102)
+    query = rng.normal(size=17)
+    series = rng.normal(size=16_421)
+    monkeypatch.setattr(mst_core, "MASS_FFT_WORK_THRESHOLD", float("inf"))
+    ours = mst.mass(query, series)
+    theirs = stumpy.mass(query, series)
+    assert ours.size >= 16_384
+    assert (query.size % 2) != 0
+    assert np.allclose(ours, theirs, atol=1e-10, rtol=1e-10)
+
+
 def test_match_parity():
     series = RNG.normal(size=100)
     query = series[20:31].copy()

@@ -14,7 +14,7 @@ from ._lib import addr, lib
 from .mparray import mparray
 
 EXCL_ZONE_DENOM = 4
-MASS_FFT_WORK_THRESHOLD = 1_000_000
+MASS_FFT_WORK_THRESHOLD = 200_000_000
 
 
 def _one_dimensional(value, name: str) -> np.ndarray:
@@ -56,22 +56,38 @@ def _validate_window(m: int, n_a: int, n_b: int | None = None) -> int:
     return m
 
 
-def _window_flags(array: np.ndarray, m: int) -> tuple[np.ndarray, np.ndarray]:
-    finite = np.isfinite(array)
-    bad_prefix = np.empty(array.size + 1, dtype=np.int64)
-    bad_prefix[0] = 0
-    np.cumsum(~finite, dtype=np.int64, out=bad_prefix[1:])
-    valid = (bad_prefix[m:] == bad_prefix[:-m]).astype(np.int64)
+def _window_flags(
+    array: np.ndarray,
+    m: int,
+    finite: np.ndarray | None = None,
+    all_finite: bool | None = None,
+) -> tuple[np.ndarray, np.ndarray]:
+    if finite is None:
+        finite = np.isfinite(array)
+    if all_finite is None:
+        all_finite = bool(finite.all())
+    length = array.size - m + 1
+    if all_finite:
+        valid = np.ones(length, dtype=np.int64)
+    else:
+        bad_prefix = np.empty(array.size + 1, dtype=np.int64)
+        bad_prefix[0] = 0
+        np.cumsum(~finite, dtype=np.int64, out=bad_prefix[1:])
+        valid = (bad_prefix[m:] == bad_prefix[:-m]).astype(np.int64)
     if m == 1:
         constant = valid.copy()
     else:
         changes = (array[1:] != array[:-1]) | ~finite[1:] | ~finite[:-1]
-        change_prefix = np.empty(changes.size + 1, dtype=np.int64)
-        change_prefix[0] = 0
-        np.cumsum(changes, dtype=np.int64, out=change_prefix[1:])
-        constant = (
-            (change_prefix[m - 1 :] == change_prefix[: -(m - 1)]) & valid.astype(bool)
-        ).astype(np.int64)
+        if bool(changes.all()):
+            constant = np.zeros(length, dtype=np.int64)
+        else:
+            change_prefix = np.empty(changes.size + 1, dtype=np.int64)
+            change_prefix[0] = 0
+            np.cumsum(changes, dtype=np.int64, out=change_prefix[1:])
+            constant = (
+                (change_prefix[m - 1 :] == change_prefix[: -(m - 1)])
+                & valid.astype(bool)
+            ).astype(np.int64)
     return valid, constant
 
 
@@ -104,12 +120,17 @@ def _normalized_data(
     stds=None,
 ):
     original = _one_dimensional(value, name)
-    valid, default_constant = _window_flags(original, m)
+    finite = np.isfinite(original)
+    all_finite = bool(finite.all())
+    valid, default_constant = _window_flags(original, m, finite, all_finite)
     constants = _constant_flags(
         original, m, valid, constant_specification, default_constant
     )
-    finite = np.isfinite(original)
-    center = float(np.mean(original[finite])) if finite.any() else 0.0
+    center = (
+        float(np.mean(original if all_finite else original[finite]))
+        if all_finite or finite.any()
+        else 0.0
+    )
     clean = original.copy()
     clean[~finite] = center
     clean -= center
@@ -121,11 +142,14 @@ def _normalized_data(
         square_prefix[0] = 0.0
         np.square(clean, out=square_prefix[1:])
         np.cumsum(square_prefix[1:], out=square_prefix[1:])
-        rolling_sum = prefix[m:] - prefix[:-m]
-        rolling_square = square_prefix[m:] - square_prefix[:-m]
-        rolling_mean = rolling_sum / m
-        variance = rolling_square / m - rolling_mean * rolling_mean
-        rolling_std = np.sqrt(np.maximum(variance, 0.0))
+        rolling_mean = np.subtract(prefix[m:], prefix[:-m])
+        rolling_mean /= m
+        rolling_std = np.subtract(square_prefix[m:], square_prefix[:-m])
+        rolling_std /= m
+        np.multiply(rolling_mean, rolling_mean, out=prefix[: rolling_mean.size])
+        rolling_std -= prefix[: rolling_mean.size]
+        np.maximum(rolling_std, 0.0, out=rolling_std)
+        np.sqrt(rolling_std, out=rolling_std)
     else:
         rolling_mean = np.ascontiguousarray(means, dtype=np.float64) - center
         rolling_std = np.ascontiguousarray(stds, dtype=np.float64)
@@ -143,14 +167,15 @@ def _normalized_data(
 
 def _raw_data(value, m: int, name: str, finite_flags=None):
     original = _one_dimensional(value, name)
-    valid, constants = _window_flags(original, m)
+    finite = np.isfinite(original)
+    valid, constants = _window_flags(original, m, finite, bool(finite.all()))
     if finite_flags is not None:
         supplied = np.asarray(finite_flags, dtype=bool)
         if supplied.shape != valid.shape:
             raise ValueError(f"T_subseq_isfinite must have shape {valid.shape}")
         valid = np.ascontiguousarray(supplied, dtype=np.int64)
     clean = original.copy()
-    clean[~np.isfinite(clean)] = 0.0
+    clean[~finite] = 0.0
     return clean, valid, constants
 
 
